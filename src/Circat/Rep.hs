@@ -1,3 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, TypeOperators #-}
 {-# LANGUAGE FlexibleInstances, EmptyCase, LambdaCase #-}
 {-# LANGUAGE CPP #-}
@@ -27,12 +32,15 @@ module Circat.Rep (HasRep(..)) where
 import Data.Monoid
 -- import Data.Newtypes.PrettyDouble
 import Control.Applicative (WrappedMonad(..))
-import qualified GHC.Generics as G
 
 import Data.Functor.Identity (Identity(..))
+import Data.Void (Void)
 import Control.Monad.Trans.Reader (ReaderT(..))
 import Control.Monad.Trans.Writer (WriterT(..))
 import Control.Monad.Trans.State (StateT(..))
+
+import GHC.Generics ((:*:)(..), (:+:)(..), Generic)
+import qualified GHC.Generics as G
 
 -- import Data.Void (Void)
 -- TODO: more
@@ -56,10 +64,77 @@ import Circat.Misc ((:*),(:+),Parity(..))
 -- method should reveal a constructor so that we can perform the
 -- case-of-known-constructor transformation.
 
+-- | A type family that takes the 'GHC.Generics' representation of a
+-- type to its representation in base types (tuples, sums... etc).
+type family ToRep (a :: * -> *) :: *
+
+-- Ignore the metadata Generics provides.
+type instance ToRep (G.M1 i c f) = ToRep f
+
+-- Basic algebraic data types: 0, 1, +, ×.
+type instance ToRep G.V1      = Void
+type instance ToRep G.U1      = ()
+type instance ToRep (a :+: b) = Either (ToRep a) (ToRep b)
+type instance ToRep (a :*: b) = (ToRep a, ToRep b)
+
+-- Recursive types and base types like Int/Double:
+type instance ToRep (G.Rec0 a) = a
+
+-- This class 
+class GHasRep f where
+  type GRep f
+  gRepr :: f a -> GRep f
+  gAbst :: GRep f -> f a
+
+instance GHasRep f => GHasRep (G.M1 i c f) where
+  type GRep (G.M1 i c f) = GRep f
+  gRepr (G.M1 x) = gRepr x
+  gAbst x = G.M1 (gAbst x)
+
+instance GHasRep G.V1 where
+  type GRep G.V1 = Void
+  gRepr = undefined
+  gAbst = undefined
+
+instance GHasRep G.U1 where
+  type GRep G.U1 = ()
+  gRepr G.U1 = ()
+  gAbst () = G.U1
+
+instance (GHasRep a, GHasRep b) => GHasRep (a :*: b) where
+  type GRep (a :*: b) = (GRep a, GRep b)
+  gRepr (a :*: b) = (gRepr a, gRepr b)
+  gAbst (a, b) = (gAbst a :*: gAbst b)
+
+instance (GHasRep a, GHasRep b) => GHasRep (a :+: b) where
+  type GRep (a :+: b) = Either (GRep a) (GRep b)
+  gRepr (L1 a) = Left (gRepr a)
+  gRepr (R1 b) = Right (gRepr b)
+  gAbst (Left a)  = L1 (gAbst a)
+  gAbst (Right b) = R1 (gAbst b)
+
+instance GHasRep (G.K1 f a) where
+  type GRep (G.K1 f a) = a
+  gRepr (G.K1 x) = x
+  gAbst x = G.K1 x
+
 class HasRep a where
-  type Rep a
+  type Rep a :: *
+  type Rep a = ToRep (G.Rep a)
+
   repr :: a -> Rep a
   abst :: Rep a -> a
+
+  default repr :: (Generic a, GHasRep (G.Rep a), Rep a ~ GRep (G.Rep a)) => a -> Rep a
+  repr a = gRepr (G.from a)
+
+  default abst :: (Generic a, GHasRep (G.Rep a), Rep a ~ GRep (G.Rep a)) => Rep a -> a
+  abst a = G.to (gAbst a)
+
+instance HasRep Double where
+  type Rep Double = Double
+  repr = id
+  abst = id
 
 -- -- Identity as @'abst' . 'repr'@.
 -- abstRepr :: HasRep a => a -> a
