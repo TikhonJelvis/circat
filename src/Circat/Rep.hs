@@ -57,13 +57,6 @@ import Circat.Misc ((:*),(:+),Parity(..))
 -- import TypeUnary.Nat (Nat(..),IsNat(..))
 -- import TypeUnary.Vec (Vec(..))
 
--- | Convert to and from standard representations. Used for transforming case
--- expression scrutinees and constructor applications. The 'repr' method should
--- convert to a standard representation (unit, products, sums), or closer to
--- such a representation, via another type with a 'HasRep' instance. The 'abst'
--- method should reveal a constructor so that we can perform the
--- case-of-known-constructor transformation.
-
 -- | A type family that takes the 'GHC.Generics' representation of a
 -- type to its representation in base types (tuples, sums... etc).
 type family ToRep (a :: * -> *) :: *
@@ -80,7 +73,8 @@ type instance ToRep (a :*: b) = (ToRep a, ToRep b)
 -- Recursive types and base types like Int/Double:
 type instance ToRep (G.Rec0 a) = a
 
--- This class 
+-- | Maps a generic value to and from its underlying
+-- representation. (A generic version of HasRep.)
 class GHasRep f where
   type GRep f
   gRepr :: f a -> GRep f
@@ -118,6 +112,23 @@ instance GHasRep (G.K1 f a) where
   gRepr (G.K1 x) = x
   gAbst x = G.K1 x
 
+
+-- | Convert to and from standard representations. Used for transforming case
+-- expression scrutinees and constructor applications. The 'repr' method should
+-- convert to a standard representation (unit, products, sums), or closer to
+-- such a representation, via another type with a 'HasRep' instance. The 'abst'
+-- method should reveal a constructor so that we can perform the
+-- case-of-known-constructor transformation.
+--
+-- This class has default implementations in terms of generics. You
+-- can get an instance of the class for free by deriving 'Generic' for
+-- your type:
+--
+-- @
+-- data MyType = MyType { .. } deriving (Generic)
+--
+-- instance HasRep MyType
+-- @
 class HasRep a where
   type Rep a :: *
   type Rep a = ToRep (G.Rep a)
